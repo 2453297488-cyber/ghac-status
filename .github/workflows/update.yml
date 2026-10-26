@@ -1,0 +1,44 @@
+name: Update vehicle status
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch status
+        env:
+          GHAC_TOKEN: ${{ secrets.GHAC_TOKEN }}
+          GHAC_VIN: ${{ secrets.GHAC_VIN }}
+          GHAC_CERT_PEM: ${{ secrets.GHAC_CERT_PEM }}
+          GHAC_CERT_KEY: ${{ secrets.GHAC_CERT_KEY }}
+          GHAC_INCLUDE_LOCATION: ${{ vars.GHAC_INCLUDE_LOCATION }}
+          GHAC_OUT: status.json
+        run: python fetch_status.py
+
+      - name: Publish to branch
+        run: |
+          mkdir -p public
+          cp status.json public/status.json
+          cd public
+          git init -q
+          git config user.name  "ghac-status-bot"
+          git config user.email "bot@local"
+          git add status.json
+          git commit -q -m "status $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git branch -M gh-pages
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git push -f origin gh-pages
