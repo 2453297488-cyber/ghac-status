@@ -3,6 +3,7 @@ import os
 import ssl
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 
@@ -31,24 +32,31 @@ def make_ctx():
     return ctx
 
 
-def get(ctx, path, timeout=20):
-    url = BASE + path
-    req = urllib.request.Request(url, headers={
-        "Authorization": f"Bearer {TOKEN}",
-        "tokenType": "0",
-        "gh_android_app_version": "5.0.2",
-        "Compatible": "50",
-        "Accept": "application/json",
-        "Accept-Encoding": "identity",
-        "User-Agent": "okhttp/4.11.0",
-    })
-    try:
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
-            return r.status, json.loads(r.read(200000).decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        return e.code, {"error": e.read(2000).decode("utf-8", "replace")}
-    except Exception as e:
-        return None, {"error": str(e)}
+def get(ctx, path, timeout=60, retries=3):
+    """带重试的 GET。GitHub 在美国，访问国内网关常常慢，多试几次。"""
+    last_err = None
+    for i in range(retries):
+        url = BASE + path
+        req = urllib.request.Request(url, headers={
+            "Authorization": f"Bearer {TOKEN}",
+            "tokenType": "0",
+            "gh_android_app_version": "5.0.2",
+            "Compatible": "50",
+            "Accept": "application/json",
+            "Accept-Encoding": "identity",
+            "User-Agent": "okhttp/4.11.0",
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+                return r.status, json.loads(r.read(200000).decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            return e.code, {"error": e.read(2000).decode("utf-8", "replace")}
+        except Exception as e:
+            last_err = str(e)
+            print(f"  第 {i+1} 次失败: {e}", file=sys.stderr)
+            if i < retries - 1:
+                time.sleep(5)
+    return None, {"error": last_err or "unknown"}
 
 
 def v(d, k):
@@ -76,7 +84,9 @@ def main():
         sys.exit(1)
 
     ctx = make_ctx()
+    print("拉取车辆状态...", file=sys.stderr)
     status, body = get(ctx, f"/vehicle/status/vin_code={VIN}")
+    print(f"状态接口返回: HTTP {status} / {body.get('code')}", file=sys.stderr)
 
     if status != 200 or body.get("code") != "000000":
         out = {
